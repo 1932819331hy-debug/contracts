@@ -45,6 +45,7 @@ pub enum FeeCollectorError {
     Unauthorized = 3,
     InvalidAmount = 4,
     ArithmeticOverflow = 5,
+    InsufficientBalance = 6,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +144,7 @@ impl FeeCollectorContract {
 
     /// Withdraw `amount` of `token` from this contract to `recipient`.
     /// Only the admin may call this.
+    /// Returns `InsufficientBalance` if the actual token balance is too small.
     pub fn withdraw(
         env: Env,
         token: Address,
@@ -164,6 +166,9 @@ impl FeeCollectorContract {
 
         // Transfer from this contract to recipient.
         let token_client = token::Client::new(&env, &token);
+        if amount > token_client.balance(&env.current_contract_address()) {
+            return Err(FeeCollectorError::InsufficientBalance);
+        }
         token_client.transfer(&env.current_contract_address(), &recipient, &amount);
 
         // Emit event.

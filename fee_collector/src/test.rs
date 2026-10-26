@@ -110,6 +110,72 @@ fn test_withdraw_sends_tokens_to_recipient() {
 }
 
 #[test]
+fn test_withdraw_rejects_amount_exceeding_actual_balance() {
+    let (env, client, admin, treasury, token, token_admin) = setup();
+    client.initialize(&admin, &treasury);
+
+    let contract_id = client.address.clone();
+    mint(&env, &token, &token_admin, &contract_id, 100);
+    // Reported lifetime fees are not proof that the tokens are available.
+    client.collect_fee(&token, &1_000i128);
+
+    let recipient = Address::generate(&env);
+    let result = client.try_withdraw(&token, &101i128, &recipient);
+    assert_eq!(result, Err(Ok(FeeCollectorError::InsufficientBalance)));
+
+    let token_client = TokenClient::new(&env, &token);
+    assert_eq!(token_client.balance(&recipient), 0);
+    assert_eq!(token_client.balance(&contract_id), 100);
+    assert_eq!(client.get_total_collected(&token), 1_000);
+}
+
+#[test]
+fn test_withdraw_can_empty_the_actual_balance() {
+    let (env, client, admin, treasury, token, token_admin) = setup();
+    client.initialize(&admin, &treasury);
+
+    let contract_id = client.address.clone();
+    mint(&env, &token, &token_admin, &contract_id, 100);
+    // A direct deposit is withdrawable even without a collect_fee record.
+    assert_eq!(client.get_total_collected(&token), 0);
+
+    let recipient = Address::generate(&env);
+    client.withdraw(&token, &100i128, &recipient);
+
+    let token_client = TokenClient::new(&env, &token);
+    assert_eq!(token_client.balance(&recipient), 100);
+    assert_eq!(token_client.balance(&contract_id), 0);
+    assert_eq!(client.get_total_collected(&token), 0);
+
+    let result = client.try_withdraw(&token, &1i128, &recipient);
+    assert_eq!(result, Err(Ok(FeeCollectorError::InsufficientBalance)));
+    assert_eq!(token_client.balance(&recipient), 100);
+    assert_eq!(token_client.balance(&contract_id), 0);
+}
+
+#[test]
+fn test_withdraw_requires_admin_auth_before_balance_validation() {
+    for balance in [0, 100] {
+        let (env, client, admin, treasury, token, token_admin) = setup();
+        client.initialize(&admin, &treasury);
+        let contract_id = client.address.clone();
+        if balance > 0 {
+            mint(&env, &token, &token_admin, &contract_id, balance);
+        }
+
+        let recipient = Address::generate(&env);
+        env.mock_auths(&[]);
+        let result = client.try_withdraw(&token, &10i128, &recipient);
+        // Missing authorization must not become an observable balance error.
+        assert_eq!(result, Err(Err(soroban_sdk::InvokeError::Abort)));
+
+        let token_client = TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&recipient), 0);
+        assert_eq!(token_client.balance(&contract_id), balance);
+    }
+}
+
+#[test]
 fn test_withdraw_invalid_amount() {
     let (env, client, admin, treasury, token, _token_admin) = setup();
     client.initialize(&admin, &treasury);
@@ -117,6 +183,19 @@ fn test_withdraw_invalid_amount() {
     let recipient = Address::generate(&env);
     let result = client.try_withdraw(&token, &0i128, &recipient);
     assert_eq!(result, Err(Ok(FeeCollectorError::InvalidAmount)));
+}
+
+#[test]
+fn test_withdraw_rejects_invalid_amount_before_querying_token() {
+    let (env, client, admin, treasury, _token, _token_admin) = setup();
+    client.initialize(&admin, &treasury);
+
+    let unknown_token = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    for amount in [0, -1] {
+        let result = client.try_withdraw(&unknown_token, &amount, &recipient);
+        assert_eq!(result, Err(Ok(FeeCollectorError::InvalidAmount)));
+    }
 }
 
 #[test]

@@ -397,6 +397,9 @@ Record fee receipt. The token transfer must already have been made by `stellar_s
 #### `withdraw(token, amount, recipient) → Result<(), FeeCollectorError>`
 
 Withdraw fees to `recipient`. **Admin only.**
+Amounts above the contract's actual balance return
+`FeeCollectorError::InsufficientBalance`; lifetime collected-fee totals are
+not used as the available balance.
 
 #### `get_balance(token) → i128`
 
